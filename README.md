@@ -27,14 +27,19 @@ workspace root.
 │   ├── resources/              # QEMU arguments
 │   ├── zynq_fsbl/              # First Stage Bootloader (FSBL)
 │   └── ps7_cortexa9_0/        # BSP for standalone domain (Cortex-A9 #0)
-└── hello_world/                # Application component
-    ├── vitis-comp.json         # Application descriptor
-    └── src/                    # Application source
-        ├── helloworld.c        # Hello World / BRAM test entry point
-        ├── platform.c / .h     # Platform init / cleanup
-        ├── lscript.ld          # Linker script
-        ├── CMakeLists.txt
-        └── UserConfig.cmake
+├── hello_world/                # Application component
+│   ├── vitis-comp.json         # Application descriptor
+│   └── src/                    # Application source
+│       ├── helloworld.c        # Hello World / BRAM test entry point
+│       ├── platform.c / .h     # Platform init / cleanup
+│       ├── lscript.ld          # Linker script
+│       ├── CMakeLists.txt
+│       └── UserConfig.cmake
+└── scripts/                    # XSCT one-click helper scripts
+    ├── run_full.tcl            # Program bitstream + ps7_init + probe + ELF run
+    ├── run_full.bat            # Windows wrapper for run_full.tcl
+    ├── run_elf_only.tcl        # ps7_init + ELF run, no bitstream program
+    └── run_elf_only.bat        # Windows wrapper for run_elf_only.tcl
 ```
 
 ## Required Development Environment
@@ -87,6 +92,102 @@ This proves that the PS UART, serial terminal, JTAG download flow, and Vitis
 application build are correct. It does **not** by itself prove that the PL-side
 AXI BRAM is already programmed and accessible.
 
+## One-Click Scripted Runs
+
+The `scripts/` directory contains helper scripts so the XSCT commands do not
+need to be typed manually every time.
+
+### Full run: program bitstream + initialize PS + run ELF
+
+Use this when:
+
+- the board was power-cycled;
+- the Vivado bitstream changed;
+- the PL status is uncertain;
+- you want to re-check AXI BRAM/GPIO before running the ELF.
+
+On Windows, run:
+
+```bat
+scripts\run_full.bat
+```
+
+Or run the Tcl script directly in XSCT:
+
+```tcl
+xsct scripts/run_full.tcl
+```
+
+The full script performs:
+
+```text
+connect
+→ select xc7z020
+→ fpga -file system_top.bit
+→ select ARM Cortex-A9 MPCore #0
+→ ps7_init / ps7_post_config
+→ mwr -force 0x40000000 0x12345678
+→ mrd -force 0x40000000
+→ mrd -force 0x41200000
+→ dow hello_world.elf
+→ con
+```
+
+Expected BRAM probe result:
+
+```text
+40000000:   12345678
+```
+
+### Fast run: initialize PS + run ELF only
+
+Use this when only Vitis C code changed and the FPGA bitstream is already
+programmed.
+
+On Windows, run:
+
+```bat
+scripts\run_elf_only.bat
+```
+
+Or run the Tcl script directly in XSCT:
+
+```tcl
+xsct scripts/run_elf_only.tcl
+```
+
+This script does **not** program the FPGA bitstream. If the board was reset or
+power-cycled, use `run_full.bat` instead.
+
+### Script path configuration
+
+The scripts try to find the common local paths automatically:
+
+- `platform_hello/export/platform_hello/hw/ps7_init.tcl`
+- `hello_world/build/hello_world.elf`
+- nearby Vivado bitstream paths such as `../sample_7606/.../system_top.bit`
+
+If the bitstream or ELF is in another location, set environment variables before
+running the script.
+
+Windows example:
+
+```bat
+set AD7606_BIT_FILE=D:\BaiduNetdiskDownload\hellovitis\hello.runs\impl_1\system_top.bit
+set AD7606_ELF_FILE=D:\BaiduNetdiskDownload\hellovitis\hello_world\build\hello_world.elf
+set AD7606_PS7_INIT=D:\BaiduNetdiskDownload\hellovitis\platform_hello\export\platform_hello\hw\ps7_init.tcl
+scripts\run_full.bat
+```
+
+Linux/macOS shell example:
+
+```sh
+export AD7606_BIT_FILE=/path/to/system_top.bit
+export AD7606_ELF_FILE=/path/to/hello_world.elf
+export AD7606_PS7_INIT=/path/to/ps7_init.tcl
+xsct scripts/run_full.tcl
+```
+
 ## Recommended XSCT Hardware Bring-Up Flow
 
 For BRAM and GPIO testing, use XSCT first. This makes the order explicit:
@@ -97,9 +198,8 @@ For BRAM and GPIO testing, use XSCT first. This makes the order explicit:
 4. Verify AXI BRAM and AXI GPIO by direct memory access.
 5. Download the Vitis ELF and run it.
 
-Open **Vitis 2024.2 Command Prompt** or the Vitis XSCT console, then run the
-following commands. Replace the `.bit` and `.elf` paths with the actual local
-paths in your workspace.
+The manual command sequence is shown below for reference. In normal daily use,
+prefer the scripts in `scripts/`.
 
 ```tcl
 connect
