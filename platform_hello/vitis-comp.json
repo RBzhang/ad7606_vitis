@@ -3,7 +3,7 @@
   "type": "PLATFORM",
   "configuration": {
     "description": "",
-    "xsa": "system_top.xsa",
+    "xsa": "D:\\BaiduNetdiskDownload\\hellovitis\\system_top.xsa",
     "xsaPathInPlatform": "platform_hello\\hw\\system_top.xsa",
     "emulationXsa": "",
     "emulationXsaPathInPlatform": "",

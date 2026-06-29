@@ -41,8 +41,10 @@ compile_commands.json
 *.su
 
 # ============================================================
-# CMake generated files (build tree only)
+# CMake / ninja generated (build tree and BSP gen_bsp)
 # ============================================================
+**/build_configs/
+**/gen_bsp/
 **/build/CMakeCache.txt
 **/build/cmake_install.cmake
 **/build/CMakeFiles/
