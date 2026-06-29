@@ -1,0 +1,83 @@
+# ============================================================
+# Vitis / Vivado build and generated directories
+# ============================================================
+build/
+export/
+_exports/
+_ide/
+.Xil/
+
+# ============================================================
+# IDE / Editor cache and metadata
+# ============================================================
+.cache/
+.compile_commands/
+.clangd
+compile_commands.json
+.clang-format
+.clang-tidy
+.cproject
+.project
+.settings/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Vitis internal tools
+# ============================================================
+.rigel_lopper/
+
+# ============================================================
+# Build artifacts
+# ============================================================
+*.elf
+*.elf.size
+*.o
+*.a
+*.d
+*.dep
+*.su
+
+# ============================================================
+# CMake generated files (build tree only)
+# ============================================================
+**/build/CMakeCache.txt
+**/build/cmake_install.cmake
+**/build/CMakeFiles/
+**/build/.ninja*
+**/build/build.ninja
+**/build/.buildstatus
+**/build/.hash-map.txt
+
+# ============================================================
+# Logs and journals
+# ============================================================
+*.log
+*.jou
+*.lso
+
+# ============================================================
+# Misc generated files
+# ============================================================
+*.bin
+*.pdi
+*.bit
+*.mmi
+*.lock
+*.vitisWorkspace.json
+
+# IDE settings files that contain absolute paths
+_ide/settings.json
+_ide/.peers.ini
+_ide/.vitisPlatformRepo.json
+_ide/workspace_journal.py
+_ide/.wsdata/
+_ide/logs/
+
+# ============================================================
+# XSA files — tracked normally (no LFS needed, < 1 MB)
+# Uncomment this line if XSA grows beyond 100 MB:
+# *.xsa filter=lfs diff=lfs merge=lfs -text
+# ============================================================
