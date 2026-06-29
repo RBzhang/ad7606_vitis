@@ -5,14 +5,24 @@
 #   3. Download ELF and run
 #
 # Use this script when only Vitis C code changed and the PL bitstream is unchanged.
-# Optional environment overrides:
-#   AD7606_PS7_INIT   - path to ps7_init.tcl
-#   AD7606_ELF_FILE   - path to hello_world.elf or another application ELF
+#
+# Path configuration priority:
+#   1. Environment variables: AD7606_PS7_INIT, AD7606_ELF_FILE
+#   2. Optional local config file: scripts/local_paths.tcl
+#   3. Common auto-detected paths
 
 proc getenv_or_empty {name} {
     global env
     if {[info exists env($name)]} {
         return $env($name)
+    }
+    return ""
+}
+
+proc var_or_empty {name} {
+    upvar #0 $name v
+    if {[info exists v]} {
+        return $v
     }
     return ""
 }
@@ -47,17 +57,30 @@ proc stop_processor {why} {
 
 set SCRIPT_DIR [file normalize [file dirname [info script]]]
 set REPO_ROOT  [file normalize [file join $SCRIPT_DIR ..]]
+set LOCAL_CONFIG [file join $SCRIPT_DIR local_paths.tcl]
+
+if {[file exists $LOCAL_CONFIG]} {
+    puts "Loading local path config: $LOCAL_CONFIG"
+    source $LOCAL_CONFIG
+} else {
+    puts "No local path config found at scripts/local_paths.tcl. Using environment variables or auto-detected paths."
+}
 
 set PS7_ENV [getenv_or_empty AD7606_PS7_INIT]
 set ELF_ENV [getenv_or_empty AD7606_ELF_FILE]
 
+set PS7_CFG [var_or_empty AD7606_PS7_INIT]
+set ELF_CFG [var_or_empty AD7606_ELF_FILE]
+
 set PS7_INIT [first_existing [list \
     $PS7_ENV \
+    $PS7_CFG \
     [file join $REPO_ROOT platform_hello export platform_hello hw ps7_init.tcl] \
 ]]
 
 set ELF_FILE [first_existing [list \
     $ELF_ENV \
+    $ELF_CFG \
     [file join $REPO_ROOT hello_world build hello_world.elf] \
 ]]
 
