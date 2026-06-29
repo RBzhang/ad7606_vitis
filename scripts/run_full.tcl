@@ -2,7 +2,7 @@
 # Full AD7606 Zynq/Vitis hardware run flow:
 #   1. Program FPGA bitstream into PL
 #   2. Switch to ARM Cortex-A9 #0
-#   3. Stop processor, then run ps7_init / ps7_post_config
+#   3. Reset and stop processor, then run ps7_init / ps7_post_config
 #   4. Probe AXI BRAM and AXI GPIO
 #   5. Download ELF and run
 #
@@ -47,11 +47,19 @@ proc require_file {label path hint} {
     }
 }
 
-proc stop_processor {why} {
+proc reset_and_stop_processor {why} {
+    puts "Resetting processor $why..."
+    if {[catch {rst -processor} rst_msg]} {
+        puts "WARNING: rst -processor failed: $rst_msg"
+    }
+    after 1000
+
     puts "Stopping processor $why..."
     if {[catch {stop} stop_msg]} {
-        puts "WARNING: stop failed: $stop_msg"
-        puts "If ps7_init fails with 'Cannot read memory if not stopped', reset/power-cycle the board and run this script again."
+        puts "ERROR: Cannot halt ARM Cortex-A9 #0: $stop_msg"
+        puts "The processor may be wedged by a previous bad AXI access."
+        puts "Press the board PS/System reset button or power-cycle the board, then run this script again."
+        error "processor halt failed"
     }
 }
 
@@ -115,10 +123,10 @@ fpga -file $BIT_FILE
 puts "Switching to ARM Cortex-A9 #0..."
 targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
 
-# ps7_init reads/writes PS registers through the selected ARM target. The ARM
-# execution context must be stopped first; otherwise XSCT can fail with:
+# ps7_init reads/writes PS registers through the selected ARM target. Reset and
+# stop the ARM first; otherwise XSCT can fail with:
 # "Cannot read memory if not stopped. Execution context is running".
-stop_processor "before ps7_init"
+reset_and_stop_processor "before ps7_init"
 
 puts "Running ps7_init / ps7_post_config..."
 source $PS7_INIT
@@ -126,7 +134,7 @@ ps7_init
 ps7_post_config
 
 puts "Stopping processor before direct memory probe..."
-stop_processor "before BRAM/GPIO probe"
+reset_and_stop_processor "before BRAM/GPIO probe"
 
 puts "Probing AXI BRAM at 0x40000000..."
 mwr -force 0x40000000 0x12345678
@@ -135,7 +143,7 @@ mrd -force 0x40000000
 puts "Probing AXI GPIO at 0x41200000..."
 mrd -force 0x41200000
 
-stop_processor "before downloading ELF"
+reset_and_stop_processor "before downloading ELF"
 
 puts "Downloading ELF..."
 dow $ELF_FILE
