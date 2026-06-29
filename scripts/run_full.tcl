@@ -6,15 +6,23 @@
 #   4. Probe AXI BRAM and AXI GPIO
 #   5. Download ELF and run
 #
-# Optional environment overrides:
-#   AD7606_BIT_FILE   - path to system_top.bit
-#   AD7606_PS7_INIT   - path to ps7_init.tcl
-#   AD7606_ELF_FILE   - path to hello_world.elf or another application ELF
+# Path configuration priority:
+#   1. Environment variables: AD7606_BIT_FILE, AD7606_PS7_INIT, AD7606_ELF_FILE
+#   2. Optional local config file: scripts/local_paths.tcl
+#   3. Common auto-detected paths
 
 proc getenv_or_empty {name} {
     global env
     if {[info exists env($name)]} {
         return $env($name)
+    }
+    return ""
+}
+
+proc var_or_empty {name} {
+    upvar #0 $name v
+    if {[info exists v]} {
+        return $v
     }
     return ""
 }
@@ -49,29 +57,46 @@ proc stop_processor {why} {
 
 set SCRIPT_DIR [file normalize [file dirname [info script]]]
 set REPO_ROOT  [file normalize [file join $SCRIPT_DIR ..]]
+set LOCAL_CONFIG [file join $SCRIPT_DIR local_paths.tcl]
+
+if {[file exists $LOCAL_CONFIG]} {
+    puts "Loading local path config: $LOCAL_CONFIG"
+    source $LOCAL_CONFIG
+} else {
+    puts "No local path config found at scripts/local_paths.tcl. Using environment variables or auto-detected paths."
+}
 
 set BIT_ENV [getenv_or_empty AD7606_BIT_FILE]
 set PS7_ENV [getenv_or_empty AD7606_PS7_INIT]
 set ELF_ENV [getenv_or_empty AD7606_ELF_FILE]
 
+set BIT_CFG [var_or_empty AD7606_BIT_FILE]
+set PS7_CFG [var_or_empty AD7606_PS7_INIT]
+set ELF_CFG [var_or_empty AD7606_ELF_FILE]
+
 set BIT_FILE [first_existing [list \
     $BIT_ENV \
+    $BIT_CFG \
     [file join $REPO_ROOT .. sample_7606 hello.runs impl_1 system_top.bit] \
     [file join $REPO_ROOT .. sample_7606 sample_7606.runs impl_1 system_top.bit] \
     [file join $REPO_ROOT hello.runs impl_1 system_top.bit] \
+    [file join $REPO_ROOT sample_7606.runs impl_1 system_top.bit] \
+    [file join $REPO_ROOT *.runs impl_1 system_top.bit] \
 ]]
 
 set PS7_INIT [first_existing [list \
     $PS7_ENV \
+    $PS7_CFG \
     [file join $REPO_ROOT platform_hello export platform_hello hw ps7_init.tcl] \
 ]]
 
 set ELF_FILE [first_existing [list \
     $ELF_ENV \
+    $ELF_CFG \
     [file join $REPO_ROOT hello_world build hello_world.elf] \
 ]]
 
-require_file "BIT_FILE" $BIT_FILE "Set AD7606_BIT_FILE to the latest Vivado bitstream, for example: set AD7606_BIT_FILE=D:/path/to/system_top.bit"
+require_file "BIT_FILE" $BIT_FILE "Set AD7606_BIT_FILE to the latest Vivado bitstream. Recommended: copy scripts/local_paths.example.tcl to scripts/local_paths.tcl and edit the paths."
 require_file "PS7_INIT" $PS7_INIT "Build the Vitis platform first, or set AD7606_PS7_INIT to platform_hello/export/platform_hello/hw/ps7_init.tcl"
 require_file "ELF_FILE" $ELF_FILE "Build the Vitis application first, or set AD7606_ELF_FILE to hello_world/build/hello_world.elf"
 
