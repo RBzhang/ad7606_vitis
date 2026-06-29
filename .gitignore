@@ -68,6 +68,11 @@ compile_commands.json
 *.lock
 *.vitisWorkspace.json
 
+# ============================================================
+# Local machine-specific run-script configuration
+# ============================================================
+scripts/local_paths.tcl
+
 # IDE settings files that contain absolute paths
 _ide/settings.json
 _ide/.peers.ini
