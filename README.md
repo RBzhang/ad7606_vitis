@@ -30,7 +30,7 @@ workspace root.
 └── hello_world/                # Application component
     ├── vitis-comp.json         # Application descriptor
     └── src/                    # Application source
-        ├── helloworld.c        # Hello World test
+        ├── helloworld.c        # Hello World / BRAM test entry point
         ├── platform.c / .h     # Platform init / cleanup
         ├── lscript.ld          # Linker script
         ├── CMakeLists.txt
@@ -41,6 +41,8 @@ workspace root.
 
 - **Vivado / Vitis 2024.2** (or later 2024.x)
 - Windows or Linux host
+- Zynq board connected through JTAG and UART
+- Serial terminal set to `115200 8N1`, no flow control
 
 ## How to Rebuild
 
@@ -70,7 +72,7 @@ compiles the FSBL + standalone BSP libraries.
 2. Build the application:
    - Right-click `hello_world` → **Build**
 
-### 3. Run on hardware
+### 3. Basic UART run on hardware
 
 1. Connect the Zynq board via JTAG and serial (UART 0, 115200 8N1).
 2. Right-click `hello_world` → **Run As → Launch on Hardware**.
@@ -81,16 +83,272 @@ Hello World
 Successfully ran Hello World application
 ```
 
+This proves that the PS UART, serial terminal, JTAG download flow, and Vitis
+application build are correct. It does **not** by itself prove that the PL-side
+AXI BRAM is already programmed and accessible.
+
+## Recommended XSCT Hardware Bring-Up Flow
+
+For BRAM and GPIO testing, use XSCT first. This makes the order explicit:
+
+1. Program the FPGA bitstream into PL.
+2. Switch back to the ARM target.
+3. Run `ps7_init` and `ps7_post_config`.
+4. Verify AXI BRAM and AXI GPIO by direct memory access.
+5. Download the Vitis ELF and run it.
+
+Open **Vitis 2024.2 Command Prompt** or the Vitis XSCT console, then run the
+following commands. Replace the `.bit` and `.elf` paths with the actual local
+paths in your workspace.
+
+```tcl
+connect
+
+# 1. Select the FPGA device and program the latest bitstream.
+targets
+targets -set -filter {name =~ "xc7z020"}
+fpga -file {D:/BaiduNetdiskDownload/hellovitis/hello.runs/impl_1/system_top.bit}
+
+# 2. Switch back to Cortex-A9 #0 before running PS init commands.
+targets
+targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+
+# 3. Initialize PS clocks, MIO, DDR, UART, and related PS settings.
+source {D:/BaiduNetdiskDownload/hellovitis/platform_hello/export/platform_hello/hw/ps7_init.tcl}
+ps7_init
+ps7_post_config
+
+# 4. Stop the processor before direct XSCT memory access.
+stop
+
+# 5. Verify AXI BRAM at 0x40000000.
+#    -force is used because XSCT may block PL AXI addresses unless forced.
+mwr -force 0x40000000 0x12345678
+mrd -force 0x40000000
+
+# 6. Optionally verify AXI GPIO at 0x41200000.
+mrd -force 0x41200000
+
+# 7. Download and run the application ELF.
+dow {D:/BaiduNetdiskDownload/hellovitis/hello_world/build/hello_world.elf}
+con
+```
+
+Expected BRAM result:
+
+```text
+40000000:   12345678
+```
+
+If this result appears, the following hardware path has been verified:
+
+```text
+PS Cortex-A9 → M_AXI_GP0 → AXI interconnect/SmartConnect → AXI BRAM Controller → BRAM
+```
+
+If `mrd -force 0x41200000` returns a value such as `00000000`, the AXI GPIO
+slave is also reachable from the PS.
+
+### Important Target-Selection Rule
+
+`fpga -file` must be executed while the current target is the FPGA device:
+
+```tcl
+targets -set -filter {name =~ "xc7z020"}
+fpga -file {path/to/system_top.bit}
+```
+
+`ps7_init`, `ps7_post_config`, `dow`, and `con` must be executed after switching
+back to the ARM processor target:
+
+```tcl
+targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+source {path/to/ps7_init.tcl}
+ps7_init
+ps7_post_config
+dow {path/to/hello_world.elf}
+con
+```
+
+If `ps7_init` is executed while the target is still `xc7z020`, XSCT may report:
+
+```text
+Context does not support memory read. Unsupported command
+```
+
+That means the target is wrong. Switch to `ARM Cortex-A9 MPCore #0` and run
+`ps7_init` again.
+
 ## BRAM Test Entry Point
 
 The AXI BRAM controller is mapped at base address `0x40000000` with a size of
-`0x10000` (64 KB). A BRAM test can be added in `hello_world/src/helloworld.c`
-by including the `xbram` driver from the BSP.
+`0x10000` (64 KB). AXI GPIO is expected at `0x41200000`.
 
-Example skeleton:
+A minimal PS-side BRAM/GPIO access test can be placed in
+`hello_world/src/helloworld.c`:
+
 ```c
-#include "xbram.h"
-// XBram_Config *cfg = XBram_LookupConfig(XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR);
+#include <stdio.h>
+#include "platform.h"
+#include "xil_printf.h"
+#include "xil_io.h"
+#include "xil_cache.h"
+#include "xil_mmu.h"
+
+#define BRAM_BASE 0x40000000U
+#define GPIO_BASE 0x41200000U
+
+int main()
+{
+    u32 v;
+
+    init_platform();
+
+    print("\r\nBRAM TEST VERSION 02\r\n");
+
+    Xil_DCacheDisable();
+    Xil_ICacheDisable();
+
+    Xil_SetTlbAttributes(BRAM_BASE, 0x14de2U);
+    Xil_SetTlbAttributes(GPIO_BASE, 0x14de2U);
+
+    xil_printf("BRAM_BASE = 0x%08x\r\n", BRAM_BASE);
+
+    print("before BRAM write\r\n");
+    Xil_Out32(BRAM_BASE + 0x00, 0x12345678U);
+    print("after BRAM write\r\n");
+
+    print("before BRAM read\r\n");
+    v = Xil_In32(BRAM_BASE + 0x00);
+    print("after BRAM read\r\n");
+
+    xil_printf("BRAM[0] = 0x%08x\r\n", v);
+
+    print("before GPIO read\r\n");
+    v = Xil_In32(GPIO_BASE + 0x00);
+    print("after GPIO read\r\n");
+
+    xil_printf("GPIO[0] = 0x%08x\r\n", v);
+
+    print("BRAM/GPIO test done\r\n");
+
+    while (1) {
+    }
+
+    cleanup_platform();
+    return 0;
+}
+```
+
+Expected serial output after running the ELF:
+
+```text
+BRAM TEST VERSION 02
+BRAM_BASE = 0x40000000
+before BRAM write
+after BRAM write
+before BRAM read
+after BRAM read
+BRAM[0] = 0x12345678
+before GPIO read
+after GPIO read
+GPIO[0] = 0x00000000
+BRAM/GPIO test done
+```
+
+## Troubleshooting
+
+### `Cannot access FPGA: Bitstream is not programmed`
+
+The PL bitstream has not been downloaded. Run:
+
+```tcl
+targets -set -filter {name =~ "xc7z020"}
+fpga -file {path/to/system_top.bit}
+```
+
+Then switch back to the ARM target and rerun `ps7_init`.
+
+### `PL AXI slave ports access is not allowed. This address has not been added to the memory map`
+
+Use forced XSCT memory access:
+
+```tcl
+mwr -force 0x40000000 0x12345678
+mrd -force 0x40000000
+```
+
+This is an XSCT access-protection issue. It does not necessarily mean the AXI
+BRAM is broken.
+
+### `Context does not support memory read. Unsupported command`
+
+`ps7_init` was likely run while the current target was `xc7z020`. Switch to the
+ARM target first:
+
+```tcl
+targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+source {path/to/ps7_init.tcl}
+ps7_init
+ps7_post_config
+```
+
+### Program stops after `before BRAM write`
+
+The CPU is probably stuck on the first AXI access:
+
+```c
+Xil_Out32(0x40000000, 0x12345678U);
+```
+
+Check the following items:
+
+- The latest bitstream has actually been programmed into the FPGA.
+- The Vitis platform was rebuilt from the latest XSA.
+- `M_AXI_GP0_ACLK` is connected to `FCLK_CLK0`.
+- The AXI interconnect/SmartConnect clocks are connected.
+- `axi_bram_ctrl_0/s_axi_aclk` is connected.
+- `axi_bram_ctrl_0/s_axi_aresetn` is driven by a released active-low reset.
+- Address Editor maps AXI BRAM to `0x40000000` with range `0x10000`.
+- AXI BRAM Controller is connected to Block Memory Generator.
+
+### `BRAM_BASE` prints as a strange large value
+
+Use `%08x` for 32-bit addresses with `xil_printf`:
+
+```c
+xil_printf("BRAM_BASE = 0x%08x\r\n", BRAM_BASE);
+```
+
+Avoid `%lx` and pointer-style formats in early bare-metal tests.
+
+## Recommended Next Bring-Up Steps
+
+After the PS-side BRAM/GPIO test passes:
+
+1. Keep using the explicit XSCT order: `fpga -file` → `ps7_init` → `dow` → `con`.
+2. Test PL-generated dummy samples before connecting real AD7606 data.
+3. Use GPIO control bits to reset the BRAM writer, clear ready flags, and enable capture.
+4. Poll `bank0_ready` / `bank1_ready` from the PS.
+5. Dump the first 16 samples from BRAM over UART.
+6. After BRAM is stable, move to lwIP/Ethernet testing.
+
+Suggested staged path:
+
+```text
+UART print
+  ↓
+XSCT BRAM mwr/mrd
+  ↓
+C program BRAM self write/read
+  ↓
+C program GPIO read/write
+  ↓
+PL dummy data → BRAM → PS UART dump
+  ↓
+AD7606 data → BRAM → PS UART dump
+  ↓
+AD7606 data → BRAM → Ethernet
 ```
 
 ## Notes
