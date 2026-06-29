@@ -77,6 +77,7 @@ set ELF_CFG [var_or_empty AD7606_ELF_FILE]
 set BIT_FILE [first_existing [list \
     $BIT_ENV \
     $BIT_CFG \
+    [file join $REPO_ROOT .. hello hello.runs impl_1 system_top.bit] \
     [file join $REPO_ROOT .. sample_7606 hello.runs impl_1 system_top.bit] \
     [file join $REPO_ROOT .. sample_7606 sample_7606.runs impl_1 system_top.bit] \
     [file join $REPO_ROOT hello.runs impl_1 system_top.bit] \
