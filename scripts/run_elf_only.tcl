@@ -1,0 +1,81 @@
+# scripts/run_elf_only.tcl
+# Fast AD7606 Zynq/Vitis run flow when the FPGA bitstream is already programmed:
+#   1. Switch to ARM Cortex-A9 #0
+#   2. Run ps7_init / ps7_post_config
+#   3. Download ELF and run
+#
+# Use this script when only Vitis C code changed and the PL bitstream is unchanged.
+# Optional environment overrides:
+#   AD7606_PS7_INIT   - path to ps7_init.tcl
+#   AD7606_ELF_FILE   - path to hello_world.elf or another application ELF
+
+proc getenv_or_empty {name} {
+    global env
+    if {[info exists env($name)]} {
+        return $env($name)
+    }
+    return ""
+}
+
+proc first_existing {paths} {
+    foreach p $paths {
+        if {$p ne "" && [file exists $p]} {
+            return [file normalize $p]
+        }
+    }
+    return ""
+}
+
+proc require_file {label path hint} {
+    if {$path eq "" || ![file exists $path]} {
+        puts "ERROR: $label not found."
+        if {$path ne ""} {
+            puts "Tried: $path"
+        }
+        puts $hint
+        error "$label not found"
+    }
+}
+
+set SCRIPT_DIR [file normalize [file dirname [info script]]]
+set REPO_ROOT  [file normalize [file join $SCRIPT_DIR ..]]
+
+set PS7_ENV [getenv_or_empty AD7606_PS7_INIT]
+set ELF_ENV [getenv_or_empty AD7606_ELF_FILE]
+
+set PS7_INIT [first_existing [list \
+    $PS7_ENV \
+    [file join $REPO_ROOT platform_hello export platform_hello hw ps7_init.tcl] \
+]]
+
+set ELF_FILE [first_existing [list \
+    $ELF_ENV \
+    [file join $REPO_ROOT hello_world build hello_world.elf] \
+]]
+
+require_file "PS7_INIT" $PS7_INIT "Build the Vitis platform first, or set AD7606_PS7_INIT to platform_hello/export/platform_hello/hw/ps7_init.tcl"
+require_file "ELF_FILE" $ELF_FILE "Build the Vitis application first, or set AD7606_ELF_FILE to hello_world/build/hello_world.elf"
+
+puts "Using PS7_INIT : $PS7_INIT"
+puts "Using ELF_FILE : $ELF_FILE"
+puts "NOTE: This script does not program the FPGA bitstream. Use run_full.tcl if the board was power-cycled or the bitstream changed."
+
+connect
+
+targets
+puts "Switching to ARM Cortex-A9 #0..."
+targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+
+puts "Running ps7_init / ps7_post_config..."
+source $PS7_INIT
+ps7_init
+ps7_post_config
+
+puts "Stopping processor..."
+stop
+
+puts "Downloading ELF..."
+dow $ELF_FILE
+
+puts "Running application..."
+con
