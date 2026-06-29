@@ -1,7 +1,7 @@
 # scripts/run_elf_only.tcl
 # Fast AD7606 Zynq/Vitis run flow when the FPGA bitstream is already programmed:
 #   1. Switch to ARM Cortex-A9 #0
-#   2. Run ps7_init / ps7_post_config
+#   2. Stop processor, then run ps7_init / ps7_post_config
 #   3. Download ELF and run
 #
 # Use this script when only Vitis C code changed and the PL bitstream is unchanged.
@@ -37,6 +37,14 @@ proc require_file {label path hint} {
     }
 }
 
+proc stop_processor {why} {
+    puts "Stopping processor $why..."
+    if {[catch {stop} stop_msg]} {
+        puts "WARNING: stop failed: $stop_msg"
+        puts "If ps7_init fails with 'Cannot read memory if not stopped', reset/power-cycle the board or use run_full.tcl."
+    }
+}
+
 set SCRIPT_DIR [file normalize [file dirname [info script]]]
 set REPO_ROOT  [file normalize [file join $SCRIPT_DIR ..]]
 
@@ -66,13 +74,17 @@ targets
 puts "Switching to ARM Cortex-A9 #0..."
 targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
 
+# ps7_init reads/writes PS registers through the selected ARM target. The ARM
+# execution context must be stopped first; otherwise XSCT can fail with:
+# "Cannot read memory if not stopped. Execution context is running".
+stop_processor "before ps7_init"
+
 puts "Running ps7_init / ps7_post_config..."
 source $PS7_INIT
 ps7_init
 ps7_post_config
 
-puts "Stopping processor..."
-stop
+stop_processor "before downloading ELF"
 
 puts "Downloading ELF..."
 dow $ELF_FILE
